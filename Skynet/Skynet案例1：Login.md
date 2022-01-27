@@ -1,4 +1,4 @@
-# Skynet案例：Login
+# Skynet案例1：Login
 
 1. 安装skynet，安装必要的库，进入目录执行`make linux`。
 
