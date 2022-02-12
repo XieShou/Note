@@ -8,14 +8,18 @@ classDiagram
         -auth_handler(token)
         -login_handler(server, uid, secret)
         -command_handler(command, ...)
+        -msgagent users 
     }
     class msgserver{
     }
     class gateserver{
     }
+    class msgagent{
+    }
 
 msgserver..> gated
 gateserver..> msgserver
+gated..> msgagent
 ```
 
 ## msgserver
@@ -193,29 +197,29 @@ end
    
    ```lua
    local function init()
-   		skynet.dispatch("lua", function (_, address, cmd, ...)
-   			local f = CMD[cmd]
-   			if f then
-   				skynet.ret(skynet.pack(f(address, ...)))
-   			else
-   				skynet.ret(skynet.pack(handler.command(cmd, address, ...)))
-   			end
-   		end)
-   	end
+           skynet.dispatch("lua", function (_, address, cmd, ...)
+               local f = CMD[cmd]
+               if f then
+                   skynet.ret(skynet.pack(f(address, ...)))
+               else
+                   skynet.ret(skynet.pack(handler.command(cmd, address, ...)))
+               end
+           end)
+       end
    ```
 
 3. `msgserver.lua`：`server.start()`中的`handler.command()`。
    
    ```lua
    local CMD = {
-   	login = assert(conf.login_handler),
-   	logout = assert(conf.logout_handler),
-   	kick = assert(conf.kick_handler),
+       login = assert(conf.login_handler),
+       logout = assert(conf.logout_handler),
+       kick = assert(conf.kick_handler),
    }
    
    function handler.command(cmd, source, ...)
        local f = assert(CMD[cmd])
-   	return f(...)
+       return f(...)
    end
    ```
    
@@ -229,35 +233,57 @@ end
    -- login server disallow multi login, so login_handler never be reentry
    -- call by login server
    function server.login_handler(uid, secret)
-   	if users[uid] then
-   		error(string.format("%s is already login", uid))
-   	end
+       if users[uid] then
+           error(string.format("%s is already login", uid))
+       end
    
-   	internal_id = internal_id + 1
-   	local id = internal_id	-- don't use internal_id directly
-   	local username = msgserver.username(uid, id, servername)
+       internal_id = internal_id + 1
+       local id = internal_id    -- don't use internal_id directly
+       local username = msgserver.username(uid, id, servername)
    
-   	-- you can use a pool to alloc new agent
-   	local agent = skynet.newservice "msgagent" --创建玩家agent
-   	local u = {
-   		username = username,
-   		agent = agent,
-   		uid = uid,
-   		subid = id,
-   	}
+       -- you can use a pool to alloc new agent
+       local agent = skynet.newservice "msgagent" --创建玩家agent
+       local u = {
+           username = username,
+           agent = agent,
+           uid = uid,
+           subid = id,
+       }
    
-   	-- trash subid (no used)
+       -- trash subid (no used)
        --用户节点初始化，调用登录
-   	skynet.call(agent, "lua", "login", uid, id, secret)
+       skynet.call(agent, "lua", "login", uid, id, secret)
    
-   	users[uid] = u
-   	username_map[username] = u
+       users[uid] = u
+       username_map[username] = u
        --向msgserver注册
-   	msgserver.login(username, secret)
+       msgserver.login(username, secret)
    
-   	-- you should return unique subid
-   	return id
+       -- you should return unique subid
+       return id
    end
    ```
 
 ---
+
+### msgagent.lua
+
+完成了这一步，用户已经登录到了Game节点。
+
+```lua
+skynet.start(function()
+	-- If you want to fork a work thread , you MUST do it in CMD.login
+	skynet.dispatch("lua", function(session, source, command, ...)
+		local f = assert(CMD[command])
+		skynet.ret(skynet.pack(f(source, ...)))
+	end)
+
+	skynet.dispatch("client", function(_,_, msg)
+		-- the simple echo service
+		skynet.sleep(10)	-- sleep a while
+		skynet.ret(msg)
+	end)
+end)
+```
+
+可以看到案例中的是一个简单的回声客户端。
